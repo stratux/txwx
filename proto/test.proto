@@ -1,0 +1,15 @@
+syntax = "proto3";
+package txwx;
+
+message WeatherMessage {
+  enum Type {
+    METAR = 0;
+    TAF = 1;
+  }
+  Type type = 1;
+  uint32 tx_time = 2;		// UNIXTIME.
+  float station_lat = 3;
+  float station_lng = 4;
+
+  string text_data = 10;
+}
