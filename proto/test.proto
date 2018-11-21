@@ -10,6 +10,7 @@ message WeatherMessage {
   uint32 tx_time = 2;		// UNIXTIME.
   float station_lat = 3;
   float station_lng = 4;
+  uint32 observation_time = 5; // UNIXTIME.
 
   string text_data = 10;
 }
