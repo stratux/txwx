@@ -9,7 +9,6 @@ import (
 	"github.com/cyoung/uatsynth"
 	"github.com/golang/protobuf/proto"
 	"hash/crc64"
-	"net"
 	"time"
 )
 
@@ -17,17 +16,6 @@ func main() {
 	u, err := uatradio.NewUATRadio()
 	if err != nil {
 		panic(err)
-	}
-
-	BROADCAST_IPv4 := net.IPv4(255, 255, 255, 255)
-	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{
-		IP:   BROADCAST_IPv4,
-		Port: 4000,
-	})
-
-	if err != nil {
-		fmt.Printf("DialUDP(): %s\n", err.Error())
-		return
 	}
 
 	crc64Table := crc64.MakeTable(crc64.ECMA)
@@ -90,7 +78,14 @@ func main() {
 		uatMsg.Lon = float64(msg.StationLng)
 		uatMsg.UTCCoupled = true
 		f := new(uatsynth.UATFrame)
-		f.Text_data = []string{"METAR " + msg.TextData}
+		switch msg.Type {
+		case txwx.WeatherMessage_METAR:
+			f.Text_data = []string{"METAR " + msg.TextData}
+		case txwx.WeatherMessage_TAF:
+			f.Text_data = []string{"TAF " + msg.TextData}
+		default:
+			f.Text_data = []string{"METAR " + msg.TextData}
+		}
 		f.FISB_hours = uint32(observationTime.Hour())
 		f.FISB_minutes = uint32(observationTime.Minute())
 		f.Product_id = 413
@@ -107,7 +102,6 @@ func main() {
 				fmt.Printf("%02x", m[i])
 			}
 			fmt.Printf(";\n")
-			conn.Write([]byte("heyoo"))
 		}
 
 		n++
