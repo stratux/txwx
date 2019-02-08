@@ -88,6 +88,10 @@ func updateWeather() {
 	}
 }
 
+// Logging
+// Daemon
+// Beacon
+
 func main() {
 	lookupMutex = &sync.Mutex{}
 
