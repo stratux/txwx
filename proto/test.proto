@@ -5,6 +5,7 @@ message WeatherMessage {
   enum Type {
     METAR = 0;
     TAF = 1;
+    BEACON = 2;
   }
   Type type = 1;
   uint32 tx_time = 2;		// UNIXTIME.
