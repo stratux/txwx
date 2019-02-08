@@ -10,12 +10,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/kellydunn/golang-geo"
 	"hash/crc64"
+	"sync"
 	"time"
 )
 
 const (
-	STATION_LAT = 44.168290
-	STATION_LNG = -81.629470
+	STATION_LAT         = 44.168290
+	STATION_LNG         = -81.629470
+	REPORTS_UPDATE_TIME = 5 * time.Minute
 )
 
 func createMETARWeatherMessage(metar ADDS.ADDSMETAR) *txwx.WeatherMessage {
@@ -58,7 +60,37 @@ func preparePacketFromWeatherMessage(msg *txwx.WeatherMessage) []byte {
 
 var crc64Table *crc64.Table
 
+var stationGeoPt *geo.Point // Station location.
+
+var lookupMutex *sync.Mutex // Protects the following weather data variables.
+var allMETARs []ADDS.ADDSMETAR
+var allTAFs []ADDS.ADDSTAF
+
+func updateWeather() {
+	updateTicker := time.NewTicker(REPORTS_UPDATE_TIME)
+	for {
+		// Get all METARs within 500 sm.
+		metars, err := ADDS.GetLatestADDSMETARsInRadiusOf(500, stationGeoPt)
+		if err != nil {
+			panic(err)
+		}
+		// Get all TAFs within 500 sm.
+		tafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(500, stationGeoPt)
+		if err != nil {
+			panic(err)
+		}
+		lookupMutex.Lock()
+		allMETARs = metars
+		allTAFs = tafs
+		lookupMutex.Unlock()
+
+		<-updateTicker.C
+	}
+}
+
 func main() {
+	lookupMutex = &sync.Mutex{}
+
 	u, err := uatradio.NewUATRadio()
 
 	if err != nil {
@@ -66,14 +98,16 @@ func main() {
 	}
 
 	crc64Table = crc64.MakeTable(crc64.ECMA)
-	stationGeoPt := geo.NewPoint(STATION_LAT, STATION_LNG)
+	stationGeoPt = geo.NewPoint(STATION_LAT, STATION_LNG)
+
+	go updateWeather()
 
 	for {
-		// Get all METARs within 500 sm.
-		metars, err := ADDS.GetLatestADDSMETARsInRadiusOf(500, stationGeoPt)
-		if err != nil {
-			panic(err)
-		}
+		lookupMutex.Lock()
+		metars := allMETARs
+		tafs := allTAFs
+		lookupMutex.Unlock()
+
 		for _, v := range metars {
 			fmt.Printf("METAR=%s\n", v.Text)
 			msg := createMETARWeatherMessage(v)
@@ -82,11 +116,7 @@ func main() {
 				u.TX(data)
 			}
 		}
-		// Get all TAFs within 500 sm.
-		tafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(500, stationGeoPt)
-		if err != nil {
-			panic(err)
-		}
+
 		for _, v := range tafs {
 			if v.Text[:4] == "TAF" {
 				v.Text = v.Text[4:]
@@ -99,6 +129,5 @@ func main() {
 			}
 		}
 
-		time.Sleep(30 * time.Second)
 	}
 }
