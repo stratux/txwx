@@ -12,6 +12,41 @@ import (
 	"time"
 )
 
+func generateUATEncodedTextReportMessage(msg *txwx.WeatherMessage) {
+	// Observation time - zulu.
+	observationTime := time.Unix(int64(msg.ObservationTime), 0)
+
+	var uatMsg uatsynth.UATMsg
+	uatMsg.Decoded = true
+	uatMsg.Lat = float64(msg.StationLat)
+	uatMsg.Lon = float64(msg.StationLng)
+	uatMsg.UTCCoupled = true
+	f := new(uatsynth.UATFrame)
+	switch msg.Type {
+	case txwx.WeatherMessage_METAR:
+		f.Text_data = []string{"METAR " + msg.TextData}
+	case txwx.WeatherMessage_TAF:
+		f.Text_data = []string{"TAF " + msg.TextData}
+	}
+	f.FISB_hours = uint32(observationTime.Hour())
+	f.FISB_minutes = uint32(observationTime.Minute())
+	f.Product_id = 413
+	f.Frame_type = 0
+	uatMsg.Frames = append(uatMsg.Frames, f)
+	encodedMessages, err := uatMsg.EncodeUplink()
+	if err != nil {
+		fmt.Printf("error encoding: %s\n", err.Error())
+		return
+	}
+	for _, m := range encodedMessages {
+		fmt.Printf("+")
+		for i := 0; i < len(m); i++ {
+			fmt.Printf("%02x", m[i])
+		}
+		fmt.Printf(";\n")
+	}
+}
+
 func main() {
 	u, err := uatradio.NewUATRadio()
 	if err != nil {
@@ -67,42 +102,17 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("OK: %s\n", msg.TextData)
-
-		// Observation time - zulu.
-		observationTime := time.Unix(int64(msg.ObservationTime), 0)
-
-		var uatMsg uatsynth.UATMsg
-		uatMsg.Decoded = true
-		uatMsg.Lat = float64(msg.StationLat)
-		uatMsg.Lon = float64(msg.StationLng)
-		uatMsg.UTCCoupled = true
-		f := new(uatsynth.UATFrame)
 		switch msg.Type {
-		case txwx.WeatherMessage_METAR:
-			f.Text_data = []string{"METAR " + msg.TextData}
-		case txwx.WeatherMessage_TAF:
-			f.Text_data = []string{"TAF " + msg.TextData}
-		default:
-			f.Text_data = []string{"METAR " + msg.TextData}
-		}
-		f.FISB_hours = uint32(observationTime.Hour())
-		f.FISB_minutes = uint32(observationTime.Minute())
-		f.Product_id = 413
-		f.Frame_type = 0
-		uatMsg.Frames = append(uatMsg.Frames, f)
-		encodedMessages, err := uatMsg.EncodeUplink()
-		if err != nil {
-			fmt.Printf("error encoding: %s\n", err.Error())
-			return
-		}
-		for _, m := range encodedMessages {
-			fmt.Printf("+")
-			for i := 0; i < len(m); i++ {
-				fmt.Printf("%02x", m[i])
+		case txwx.WeatherMessage_METAR, txwx.WeatherMessage_TAF:
+			generateUATEncodedTextReportMessage(msg)
+		case txwx.WeatherMessage_BEACON:
+			if msg.ServerStatus != nil {
+				fmt.Printf("Received beacon message from station (%0.4f, %0.4f): TimeOk=%b, WeatherUpdatesOk=%b, MetarsTracked=%d, TafsTracked=%d.\n", msg.StationLat, msg.StationLng, msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
 			}
-			fmt.Printf(";\n")
+		default:
 		}
+
+		fmt.Printf("OK: %s\n", msg.TextData)
 
 		n++
 	}
