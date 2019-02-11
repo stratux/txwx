@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"github.com/cyoung/ADDS"
 	"github.com/golang/protobuf/proto"
@@ -25,6 +27,7 @@ import (
 const (
 	SITUATION_URL       = "http://localhost/getSituation"
 	REPORTS_UPDATE_TIME = 5 * time.Minute
+	BEACON_TIME         = 1 * time.Second
 )
 
 type status struct {
@@ -50,6 +53,11 @@ var stationGeoPt *geo.Point // Station location.
 var lookupMutex *sync.Mutex // Protects the following weather data variables.
 var allMETARs []ADDS.ADDSMETAR
 var allTAFs []ADDS.ADDSTAF
+
+// Run options.
+var beaconMode bool // Just send beacons, don't send any weather.
+var txMetars bool   // Send METARs on/off.
+var txTafs bool     // Send TAFs on/off.
 
 func situationUpdater() {
 	situationUpdateTicker := time.NewTicker(1 * time.Second)
@@ -86,26 +94,48 @@ func situationUpdater() {
 }
 
 func createMETARWeatherMessage(metar ADDS.ADDSMETAR) *txwx.WeatherMessage {
-	tn := time.Now().Unix()
 	return &txwx.WeatherMessage{
 		Type:            txwx.WeatherMessage_METAR,
-		TxTime:          uint32(tn),
-		StationLat:      Location.GPSLatitude,
-		StationLng:      Location.GPSLongitude,
+		TxTime:          uint32(time.Now().Unix()),
+		StationLat:      float32(stationGeoPt.Lat()),
+		StationLng:      float32(stationGeoPt.Lng()),
 		TextData:        metar.Text,
 		ObservationTime: uint32(metar.Observation.Time.Unix()),
 	}
 }
+
 func createTAFWeatherMessage(taf ADDS.ADDSTAF) *txwx.WeatherMessage {
-	tn := time.Now().Unix()
 	return &txwx.WeatherMessage{
 		Type:            txwx.WeatherMessage_TAF,
-		TxTime:          uint32(tn),
-		StationLat:      Location.GPSLatitude,
-		StationLng:      Location.GPSLongitude,
+		TxTime:          uint32(time.Now().Unix()),
+		StationLat:      float32(stationGeoPt.Lat()),
+		StationLng:      float32(stationGeoPt.Lng()),
 		TextData:        taf.Text,
 		ObservationTime: uint32(taf.BulletinTime.Time.Unix()),
 	}
+}
+
+func sendBeaconMessage(u *uatradio.UATRadio) error {
+	serverStatus := &txwx.ServerStatus{
+		TimeOk:                 true, //FIXME.
+		WeatherUpdatesOk:       true, //FIXME.
+		MetarsTracked:          uint32(len(allMETARs)),
+		TafsTracked:            uint32(len(allTAFs)),
+		FreqBandStart:          902,                           //FIXME.
+		FreqBandEnd:            928,                           //FIXME.
+		FreqSchemeList:         []uint32{(915 - 902) * 65536}, //FIXME: 915 MHz fixed, for now.
+		FreqSchemeDwell:        []uint32{10000},               //FIXME.
+		FreqSchemeCurrentIndex: 0,                             //FIXME.
+	}
+	msg := &txwx.WeatherMessage{
+		Type:            txwx.WeatherMessage_BEACON,
+		TxTime:          uint32(time.Now().Unix()),
+		StationLat:      float32(stationGeoPt.Lat()),
+		StationLng:      float32(stationGeoPt.Lng()),
+		ObservationTime: uint32(time.Now().Unix()),
+		ServerStatus:    serverStatus,
+	}
+	return txWeatherMessage(u, msg)
 }
 
 func preparePacketFromWeatherMessage(msg *txwx.WeatherMessage) []byte {
@@ -123,6 +153,16 @@ func preparePacketFromWeatherMessage(msg *txwx.WeatherMessage) []byte {
 	return data
 }
 
+func txWeatherMessage(u *uatradio.UATRadio, msg *txwx.WeatherMessage) error {
+	data := preparePacketFromWeatherMessage(msg)
+	if len(data) < 150 {
+		u.TX(data)
+		globalStatus.MessagesSent++
+		return nil
+	}
+	return errors.New("txWeatherMessage(): Message too long.")
+}
+
 func updateWeather() {
 	updateTicker := time.NewTicker(REPORTS_UPDATE_TIME)
 	for {
@@ -130,15 +170,21 @@ func updateWeather() {
 			log.Printf("Waiting for GPS position from Stratux...\n")
 			time.Sleep(15 * time.Second)
 		}
-		// Get all METARs within 500 sm.
-		metars, err := ADDS.GetLatestADDSMETARsInRadiusOf(500, stationGeoPt)
-		if err != nil {
-			panic(err)
+		var metars []ADDS.ADDSMETAR
+		var tafs []ADDS.ADDSMETAR
+		if txMetars { // Only request METARs when METAR TX is enabled.
+			// Get all METARs within 500 sm.
+			metars, err := ADDS.GetLatestADDSMETARsInRadiusOf(500, stationGeoPt)
+			if err != nil {
+				panic(err)
+			}
 		}
-		// Get all TAFs within 500 sm.
-		tafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(500, stationGeoPt)
-		if err != nil {
-			panic(err)
+		if txTafs { // Only request TAFs when TAF TX is enabled.
+			// Get all TAFs within 500 sm.
+			tafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(500, stationGeoPt)
+			if err != nil {
+				panic(err)
+			}
 		}
 		lookupMutex.Lock()
 		allMETARs = metars
@@ -159,10 +205,17 @@ func printStats() {
 	}
 }
 
-// Beacon
+func init() {
+	lookupMutex = &sync.Mutex{}
+	flag.BoolVar(&beaconMode, "beaconMode", false, "Transmit beacons only.")
+	flag.BoolVar(&txMetars, "metars", true, "Transmit METARs. OFF in beaconMode, regardless of setting.")
+	flag.BoolVar(&txTafs, "tafs", true, "Transmit TAFs. OFF in beaconMode, regardless of setting.")
+
+}
 
 func main() {
-	lookupMutex = &sync.Mutex{}
+	init()
+	beaconTicker := time.NewTicker(BEACON_TIME)
 
 	fp, err := os.OpenFile("/var/log/txwx.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
@@ -191,26 +244,33 @@ func main() {
 		tafs := allTAFs
 		lookupMutex.Unlock()
 
-		for _, v := range metars {
-			msg := createMETARWeatherMessage(v)
-			data := preparePacketFromWeatherMessage(msg)
-			if len(data) < 150 {
-				u.TX(data)
-				globalStatus.MessagesSent++
+		if !beaconMode {
+			if txMetars {
+				for _, v := range metars {
+					msg := createMETARWeatherMessage(v)
+					txWeatherMessage(u, msg)
+				}
+			}
+
+			if txTafs {
+				for _, v := range tafs {
+					if v.Text[:4] == "TAF" {
+						v.Text = v.Text[4:]
+					}
+					msg := createTAFWeatherMessage(v)
+					txWeatherMessage(u, msg)
+				}
 			}
 		}
 
-		for _, v := range tafs {
-			if v.Text[:4] == "TAF" {
-				v.Text = v.Text[4:]
-			}
-			msg := createTAFWeatherMessage(v)
-			data := preparePacketFromWeatherMessage(msg)
-			if len(data) < 150 {
-				u.TX(data)
-				globalStatus.MessagesSent++
-			}
+		select {
+		case <-beaconTicker.C:
+			// Time to send a beacon message.
+			sendBeaconMessage(u)
+		default:
+			// Default case so that the select doesn't block.
+			//  In reality, if BEACON_TIME is shorter than it takes to transmit all weather data,
+			//  a beacon message will be sent out on each loop.
 		}
-
 	}
 }

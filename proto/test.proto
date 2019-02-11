@@ -1,6 +1,19 @@
 syntax = "proto3";
 package txwx;
 
+message ServerStatus {
+  bool time_ok = 1;
+  bool weather_updates_ok = 2;
+  uint32 metars_tracked = 3;
+  uint32 tafs_tracked = 4;
+  repeated uint32 freq_scheme_list = 5 [packed=true];
+  repeated uint32 freq_scheme_dwell = 6 [packed=true];
+  repeated uint32 freq_scheme_modmode = 7 [packed=true];
+  uint32 freq_scheme_current_index = 8;
+  uint32 freq_band_start = 9;
+  uint32 freq_band_end = 10;
+}
+
 message WeatherMessage {
   enum Type {
     METAR = 0;
@@ -14,4 +27,5 @@ message WeatherMessage {
   uint32 observation_time = 5; // UNIXTIME.
 
   string text_data = 10;
+  ServerStatus server_status = 11;
 }
