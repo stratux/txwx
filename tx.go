@@ -55,9 +55,11 @@ var allMETARs []ADDS.ADDSMETAR
 var allTAFs []ADDS.ADDSTAF
 
 // Run options.
-var beaconMode bool // Just send beacons, don't send any weather.
-var txMetars bool   // Send METARs on/off.
-var txTafs bool     // Send TAFs on/off.
+var beaconMode bool   // Just send beacons, don't send any weather.
+var txMetars bool     // Send METARs on/off.
+var txTafs bool       // Send TAFs on/off.
+var manualLat float64 // Manually entered station lat.
+var manualLng float64 // Manually entered station lng.
 
 func situationUpdater() {
 	situationUpdateTicker := time.NewTicker(1 * time.Second)
@@ -202,7 +204,8 @@ func printStats() {
 	for {
 		<-statTimer.C
 		log.Printf("stats [started: %s]\n", humanize.RelTime(startTime, time.Now(), "ago", "from now"))
-		log.Printf(" - Messages sent: %d\n", globalStatus.MessagesSent)
+		log.Printf(" - Messages sent: %d, METARs tracked: %d, TAFs tracked: %d.\n", globalStatus.MessagesSent, len(allMETARs), len(allTAFs))
+		log.Printf(" - Current location: (%0.4f, %0.4f).\n", Location.GPSLatitude, Location.GPSLongitude)
 	}
 }
 
@@ -211,6 +214,9 @@ func startup() {
 	flag.BoolVar(&beaconMode, "beaconMode", false, "Transmit beacons only.")
 	flag.BoolVar(&txMetars, "metars", true, "Transmit METARs. OFF in beaconMode, regardless of setting.")
 	flag.BoolVar(&txTafs, "tafs", true, "Transmit TAFs. OFF in beaconMode, regardless of setting.")
+
+	flag.Float64Var(&manualLat, "lat", 0.0, "Station latitude. If entered with longitude, GPS data is not used.")
+	flag.Float64Var(&manualLng, "lng", 0.0, "Station longitude. If entered with latitude, GPS data is not used.")
 
 	flag.Parse()
 }
@@ -236,9 +242,15 @@ func main() {
 
 	crc64Table = crc64.MakeTable(crc64.ECMA)
 
-	go situationUpdater() // Update current station position from Stratux.
-	go updateWeather()    // Update weather data from ADDS.
-	go printStats()       // Periodically print stats.
+	if manualLat == 0. && manualLng == 0. {
+		go situationUpdater() // Update current station position from Stratux.
+	} else {
+		Location.GPSLatitude = float32(manualLat)
+		Location.GPSLongitude = float32(manualLng)
+		stationGeoPt = geo.NewPoint(manualLat, manualLng)
+	}
+	go updateWeather() // Update weather data from ADDS.
+	go printStats()    // Periodically print stats.
 
 	for {
 		lookupMutex.Lock()
@@ -274,5 +286,6 @@ func main() {
 			//  In reality, if BEACON_TIME is shorter than it takes to transmit all weather data,
 			//  a beacon message will be sent out on each loop.
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

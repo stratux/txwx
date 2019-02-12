@@ -105,14 +105,13 @@ func main() {
 		switch msg.Type {
 		case txwx.WeatherMessage_METAR, txwx.WeatherMessage_TAF:
 			generateUATEncodedTextReportMessage(msg)
+			fmt.Printf("OK: %s\n", msg.TextData)
 		case txwx.WeatherMessage_BEACON:
 			if msg.ServerStatus != nil {
 				fmt.Printf("Received beacon message from station (%0.4f, %0.4f): TimeOk=%t, WeatherUpdatesOk=%t, MetarsTracked=%d, TafsTracked=%d.\n", msg.StationLat, msg.StationLng, msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
 			}
 		default:
 		}
-
-		fmt.Printf("OK: %s\n", msg.TextData)
 
 		n++
 	}
