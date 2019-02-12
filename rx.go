@@ -129,13 +129,15 @@ func main() {
 		panic(err)
 	}
 
-	if globalSettings.ManualLat == 0. && globalSettings.ManualLng == 0. {
-		go situationUpdater() // Update current station position from Stratux.
-	} else {
+	if globalSettings.ManualLat != 0. || globalSettings.ManualLng != 0. {
+		// Save the manually entered lat/lng as the current location, for now. If a GPS lock is obtained,
+		//  then this position will be overwritten.
 		Location.GPSLatitude = float32(globalSettings.ManualLat)
 		Location.GPSLongitude = float32(globalSettings.ManualLng)
 		stationGeoPt = geo.NewPoint(globalSettings.ManualLat, globalSettings.ManualLng)
 	}
+
+	go situationUpdater() // Update current station position from Stratux.
 
 	crc64Table := crc64.MakeTable(crc64.ECMA)
 
