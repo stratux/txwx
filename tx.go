@@ -119,14 +119,15 @@ func createTAFWeatherMessage(taf ADDS.ADDSTAF) *txwx.WeatherMessage {
 
 func sendBeaconMessage(u *uatradio.UATRadio) error {
 	serverStatus := &txwx.ServerStatus{
-		TimeOk:                 true, //FIXME.
-		WeatherUpdatesOk:       true, //FIXME.
+		TimeOk:                 Location.GPSFixQuality > 0,
+		WeatherUpdatesOk:       len(allMETARs) > 0, //FIXME.
 		MetarsTracked:          uint32(len(allMETARs)),
 		TafsTracked:            uint32(len(allTAFs)),
 		FreqBandStart:          902,                           //FIXME.
 		FreqBandEnd:            928,                           //FIXME.
 		FreqSchemeList:         []uint32{(915 - 902) * 65536}, //FIXME: 915 MHz fixed, for now.
 		FreqSchemeDwell:        []uint32{10000},               //FIXME.
+		FreqSchemeModmode:      []uint32{1},                   //FIXME.
 		FreqSchemeCurrentIndex: 0,                             //FIXME.
 	}
 	msg := &txwx.WeatherMessage{
