@@ -4,19 +4,13 @@ import (
 	"./proto"
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"github.com/cyoung/ADDS"
 	"github.com/golang/protobuf/proto"
 	"github.com/kellydunn/golang-geo"
 	"hash/crc64"
-	"io"
-	"io/ioutil"
 	"log"
-	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -25,7 +19,6 @@ import (
 )
 
 const (
-	SITUATION_URL       = "http://localhost/getSituation"
 	REPORTS_UPDATE_TIME = 5 * time.Minute
 	BEACON_TIME         = 1 * time.Second
 )
@@ -34,66 +27,18 @@ type status struct {
 	MessagesSent uint64
 }
 
-type MySituation struct {
-	GPSLatitude    float32
-	GPSLongitude   float32
-	GPSAltitudeMSL float32 // Feet MSL
-	GPSFixQuality  uint8
-	GPSTime        time.Time
-}
-
 var globalStatus status
 
-var Location MySituation
-
 var crc64Table *crc64.Table
-
-var stationGeoPt *geo.Point // Station location.
 
 var lookupMutex *sync.Mutex // Protects the following weather data variables.
 var allMETARs []ADDS.ADDSMETAR
 var allTAFs []ADDS.ADDSTAF
 
 // Run options.
-var beaconMode bool   // Just send beacons, don't send any weather.
-var txMetars bool     // Send METARs on/off.
-var txTafs bool       // Send TAFs on/off.
-var manualLat float64 // Manually entered station lat.
-var manualLng float64 // Manually entered station lng.
-
-func situationUpdater() {
-	situationUpdateTicker := time.NewTicker(1 * time.Second)
-	for {
-		<-situationUpdateTicker.C
-
-		resp, err := http.Get(SITUATION_URL)
-		if err != nil {
-			log.Printf("HTTP GET error: %s\n", err.Error())
-			continue
-		}
-
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			log.Printf("HTTP GET body error: %s\n", err.Error())
-			resp.Body.Close()
-			continue
-		}
-
-		err = json.Unmarshal(body, &Location)
-
-		if err != nil {
-			log.Printf("HTTP JSON unmarshal error: %s\n", err.Error())
-		}
-		resp.Body.Close()
-		if Location.GPSFixQuality > 0 {
-			if stationGeoPt == nil {
-				// First lock.
-				log.Printf("First GPS location obtained.\n")
-			}
-			stationGeoPt = geo.NewPoint(float64(Location.GPSLatitude), float64(Location.GPSLongitude))
-		}
-	}
-}
+var beaconMode bool // Just send beacons, don't send any weather.
+var txMetars bool   // Send METARs on/off.
+var txTafs bool     // Send TAFs on/off.
 
 func createMETARWeatherMessage(metar ADDS.ADDSMETAR) *txwx.WeatherMessage {
 	return &txwx.WeatherMessage{
@@ -216,8 +161,8 @@ func startup() {
 	flag.BoolVar(&txMetars, "metars", true, "Transmit METARs. OFF in beaconMode, regardless of setting.")
 	flag.BoolVar(&txTafs, "tafs", true, "Transmit TAFs. OFF in beaconMode, regardless of setting.")
 
-	flag.Float64Var(&manualLat, "lat", 0.0, "Station latitude. If entered with longitude, GPS data is not used.")
-	flag.Float64Var(&manualLng, "lng", 0.0, "Station longitude. If entered with latitude, GPS data is not used.")
+	flag.Float64Var(&globalSettings.ManualLat, "lat", 0.0, "Station latitude. If entered with longitude, GPS data is not used.")
+	flag.Float64Var(&globalSettings.ManualLng, "lng", 0.0, "Station longitude. If entered with latitude, GPS data is not used.")
 
 	flag.Parse()
 }
@@ -226,15 +171,16 @@ func main() {
 	startup()
 	beaconTicker := time.NewTicker(BEACON_TIME)
 
-	fp, err := os.OpenFile("/var/log/txwx.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		fmt.Printf("Unable to open logfile: %s\n", err.Error())
+	setupLogging("/var/log/txwx.log") // Open logfile, set "log" output to save there and print to stdout.
+
+	readSettings()
+
+	if globalSettings.Mode != MODE_TX {
+		log.Printf("Configuration file does not enable TX mode. Quitting.\n")
 		return
 	}
-	mfp := io.MultiWriter(fp, os.Stdout)
-	log.SetOutput(mfp)
 
-	u, err := uatradio.NewUATRadio()
+	u, err := uatradio.NewUATRadio(globalSettings.Freq, globalSettings.RadioModMode)
 
 	if err != nil {
 		log.Printf("Unable to open radio: %s\n", err.Error())
@@ -243,12 +189,12 @@ func main() {
 
 	crc64Table = crc64.MakeTable(crc64.ECMA)
 
-	if manualLat == 0. && manualLng == 0. {
+	if globalSettings.ManualLat == 0. && globalSettings.ManualLng == 0. {
 		go situationUpdater() // Update current station position from Stratux.
 	} else {
-		Location.GPSLatitude = float32(manualLat)
-		Location.GPSLongitude = float32(manualLng)
-		stationGeoPt = geo.NewPoint(manualLat, manualLng)
+		Location.GPSLatitude = float32(globalSettings.ManualLat)
+		Location.GPSLongitude = float32(globalSettings.ManualLng)
+		stationGeoPt = geo.NewPoint(globalSettings.ManualLat, globalSettings.ManualLng)
 	}
 	go updateWeather() // Update weather data from ADDS.
 	go printStats()    // Periodically print stats.

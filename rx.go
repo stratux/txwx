@@ -1,16 +1,32 @@
 package main
 
 import (
-	uatradio "../gouatradio"
 	"./proto"
 	"bytes"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"github.com/cyoung/uatsynth"
 	"github.com/golang/protobuf/proto"
+	"github.com/kellydunn/golang-geo"
 	"hash/crc64"
+	"log"
 	"time"
+
+	uatradio "../gouatradio"
+	humanize "github.com/dustin/go-humanize"
 )
+
+type status struct {
+	MessagesReceived uint64
+	CRCErrors        uint64
+}
+
+var globalStatus status
+
+// Run options.
+var manualLat float64 // Manually entered station lat.
+var manualLng float64 // Manually entered station lng.
 
 func generateUATEncodedTextReportMessage(msg *txwx.WeatherMessage) {
 	// Observation time - zulu.
@@ -35,7 +51,7 @@ func generateUATEncodedTextReportMessage(msg *txwx.WeatherMessage) {
 	uatMsg.Frames = append(uatMsg.Frames, f)
 	encodedMessages, err := uatMsg.EncodeUplink()
 	if err != nil {
-		fmt.Printf("error encoding: %s\n", err.Error())
+		log.Printf("error encoding: %s\n", err.Error())
 		return
 	}
 	for _, m := range encodedMessages {
@@ -47,10 +63,54 @@ func generateUATEncodedTextReportMessage(msg *txwx.WeatherMessage) {
 	}
 }
 
+func printStats() {
+	statTimer := time.NewTicker(1 * time.Minute)
+	startTime := time.Now()
+	for {
+		<-statTimer.C
+		log.Printf("stats [started: %s]\n", humanize.RelTime(startTime, time.Now(), "ago", "from now"))
+		log.Printf(" - Messages received: %d, CRC errors: %d.\n", globalStatus.MessagesReceived, globalStatus.CRCErrors)
+		log.Printf(" - Current location: (%0.4f, %0.4f).\n", Location.GPSLatitude, Location.GPSLongitude)
+	}
+}
+
+func startup() {
+	flag.Float64Var(&globalSettings.ManualLat, "lat", 0.0, "Station latitude. If entered with longitude, GPS data is not used.")
+	flag.Float64Var(&globalSettings.ManualLng, "lng", 0.0, "Station longitude. If entered with latitude, GPS data is not used.")
+
+	flag.Parse()
+}
+
 func main() {
-	u, err := uatradio.NewUATRadio()
+	startup()
+	setupLogging("/var/log/rxwx.log") // Open logfile, set "log" output to save there and print to stdout.
+
+	readSettings()
+
+	if globalSettings.Mode != MODE_RX {
+		log.Printf("Configuration file does not enable RX mode. Doing nothing.\n")
+		//FIXME: Since this binary will be temporarily run and piped to Stratux in the rxwx/txwx
+		// configuration, we just loop to keep gen_gdl90 running.
+		for {
+			time.Sleep(1 * time.Second)
+		}
+		return
+	}
+
+	go printStats()
+
+	u, err := uatradio.NewUATRadio(globalSettings.Freq, globalSettings.RadioModMode)
 	if err != nil {
+		log.Printf("Unable to open radio: %s\n", err.Error())
 		panic(err)
+	}
+
+	if globalSettings.ManualLat == 0. && globalSettings.ManualLng == 0. {
+		go situationUpdater() // Update current station position from Stratux.
+	} else {
+		Location.GPSLatitude = float32(globalSettings.ManualLat)
+		Location.GPSLongitude = float32(globalSettings.ManualLng)
+		stationGeoPt = geo.NewPoint(globalSettings.ManualLat, globalSettings.ManualLng)
 	}
 
 	crc64Table := crc64.MakeTable(crc64.ECMA)
@@ -70,19 +130,21 @@ func main() {
 		dataBuf := bytes.NewReader(radioMsg.Data)
 		err := binary.Read(dataBuf, binary.LittleEndian, &msgLen)
 		if err != nil {
-			fmt.Printf("binary.Read(): %s\n", err.Error())
+			//fmt.Printf("binary.Read(): %s\n", err.Error())
 			continue
 		}
 		err = binary.Read(dataBuf, binary.LittleEndian, &crc)
 		if err != nil {
-			fmt.Printf("binary.Read(): %s\n", err.Error())
+			//fmt.Printf("binary.Read(): %s\n", err.Error())
 			continue
 		}
 
 		if int(msgLen)+10 > len(radioMsg.Data) {
-			fmt.Printf("msgLen=%d, len(radioMsg.Data)=%d. skipping.\n", msgLen, len(radioMsg.Data))
+			//fmt.Printf("msgLen=%d, len(radioMsg.Data)=%d. skipping.\n", msgLen, len(radioMsg.Data))
 			continue
 		}
+
+		globalStatus.MessagesReceived++
 
 		// Trim data according to msgLen.
 		trimmedData := radioMsg.Data[10 : msgLen+10]
@@ -90,25 +152,26 @@ func main() {
 		// Calculate CRC of the message.
 		calculatedCRC := crc64.Checksum(trimmedData, crc64Table)
 		if crc != calculatedCRC {
-			fmt.Printf("skipping - CRC bad.\n")
+			//fmt.Printf("skipping - CRC bad.\n")
+			globalStatus.CRCErrors++
 			continue
 		}
-		fmt.Printf("msgLen=%d, crc=%d, calculatedCRC=%d\n", msgLen, crc, calculatedCRC)
+		//fmt.Printf("msgLen=%d, crc=%d, calculatedCRC=%d\n", msgLen, crc, calculatedCRC)
 
 		msg := new(txwx.WeatherMessage)
 		err = proto.Unmarshal(trimmedData, msg)
 		if err != nil {
-			fmt.Printf("err proto.Unmarshal(): %s\n", err.Error())
+			log.Printf("err proto.Unmarshal(): %s\n", err.Error())
 			continue
 		}
 
 		switch msg.Type {
 		case txwx.WeatherMessage_METAR, txwx.WeatherMessage_TAF:
 			generateUATEncodedTextReportMessage(msg)
-			fmt.Printf("OK: %s\n", msg.TextData)
+			log.Printf("OK: %s\n", msg.TextData)
 		case txwx.WeatherMessage_BEACON:
 			if msg.ServerStatus != nil {
-				fmt.Printf("Received beacon message from station (%0.4f, %0.4f): TimeOk=%t, WeatherUpdatesOk=%t, MetarsTracked=%d, TafsTracked=%d.\n", msg.StationLat, msg.StationLng, msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
+				log.Printf("Received beacon message from station (%0.4f, %0.4f): TimeOk=%t, WeatherUpdatesOk=%t, MetarsTracked=%d, TafsTracked=%d.\n", msg.StationLat, msg.StationLng, msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
 			}
 		default:
 		}
