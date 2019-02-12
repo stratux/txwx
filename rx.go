@@ -107,7 +107,7 @@ func main() {
 			generateUATEncodedTextReportMessage(msg)
 		case txwx.WeatherMessage_BEACON:
 			if msg.ServerStatus != nil {
-				fmt.Printf("Received beacon message from station (%0.4f, %0.4f): TimeOk=%b, WeatherUpdatesOk=%b, MetarsTracked=%d, TafsTracked=%d.\n", msg.StationLat, msg.StationLng, msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
+				fmt.Printf("Received beacon message from station (%0.4f, %0.4f): TimeOk=%t, WeatherUpdatesOk=%t, MetarsTracked=%d, TafsTracked=%d.\n", msg.StationLat, msg.StationLng, msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
 			}
 		default:
 		}

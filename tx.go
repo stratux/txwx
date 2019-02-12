@@ -97,8 +97,8 @@ func createMETARWeatherMessage(metar ADDS.ADDSMETAR) *txwx.WeatherMessage {
 	return &txwx.WeatherMessage{
 		Type:            txwx.WeatherMessage_METAR,
 		TxTime:          uint32(time.Now().Unix()),
-		StationLat:      float32(stationGeoPt.Lat()),
-		StationLng:      float32(stationGeoPt.Lng()),
+		StationLat:      Location.GPSLatitude,
+		StationLng:      Location.GPSLongitude,
 		TextData:        metar.Text,
 		ObservationTime: uint32(metar.Observation.Time.Unix()),
 	}
@@ -108,8 +108,8 @@ func createTAFWeatherMessage(taf ADDS.ADDSTAF) *txwx.WeatherMessage {
 	return &txwx.WeatherMessage{
 		Type:            txwx.WeatherMessage_TAF,
 		TxTime:          uint32(time.Now().Unix()),
-		StationLat:      float32(stationGeoPt.Lat()),
-		StationLng:      float32(stationGeoPt.Lng()),
+		StationLat:      Location.GPSLatitude,
+		StationLng:      Location.GPSLongitude,
 		TextData:        taf.Text,
 		ObservationTime: uint32(taf.BulletinTime.Time.Unix()),
 	}
@@ -130,8 +130,8 @@ func sendBeaconMessage(u *uatradio.UATRadio) error {
 	msg := &txwx.WeatherMessage{
 		Type:            txwx.WeatherMessage_BEACON,
 		TxTime:          uint32(time.Now().Unix()),
-		StationLat:      float32(stationGeoPt.Lat()),
-		StationLng:      float32(stationGeoPt.Lng()),
+		StationLat:      Location.GPSLatitude,
+		StationLng:      Location.GPSLongitude,
 		ObservationTime: uint32(time.Now().Unix()),
 		ServerStatus:    serverStatus,
 	}
@@ -171,17 +171,18 @@ func updateWeather() {
 			time.Sleep(15 * time.Second)
 		}
 		var metars []ADDS.ADDSMETAR
-		var tafs []ADDS.ADDSMETAR
+		var tafs []ADDS.ADDSTAF
+		var err error
 		if txMetars { // Only request METARs when METAR TX is enabled.
 			// Get all METARs within 500 sm.
-			metars, err := ADDS.GetLatestADDSMETARsInRadiusOf(500, stationGeoPt)
+			metars, err = ADDS.GetLatestADDSMETARsInRadiusOf(500, stationGeoPt)
 			if err != nil {
 				panic(err)
 			}
 		}
 		if txTafs { // Only request TAFs when TAF TX is enabled.
 			// Get all TAFs within 500 sm.
-			tafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(500, stationGeoPt)
+			tafs, err = ADDS.GetLatestADDSTAFsInRadiusOf(500, stationGeoPt)
 			if err != nil {
 				panic(err)
 			}
@@ -205,16 +206,17 @@ func printStats() {
 	}
 }
 
-func init() {
+func startup() {
 	lookupMutex = &sync.Mutex{}
 	flag.BoolVar(&beaconMode, "beaconMode", false, "Transmit beacons only.")
 	flag.BoolVar(&txMetars, "metars", true, "Transmit METARs. OFF in beaconMode, regardless of setting.")
 	flag.BoolVar(&txTafs, "tafs", true, "Transmit TAFs. OFF in beaconMode, regardless of setting.")
 
+	flag.Parse()
 }
 
 func main() {
-	init()
+	startup()
 	beaconTicker := time.NewTicker(BEACON_TIME)
 
 	fp, err := os.OpenFile("/var/log/txwx.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
