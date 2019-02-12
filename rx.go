@@ -11,10 +11,15 @@ import (
 	"github.com/kellydunn/golang-geo"
 	"hash/crc64"
 	"log"
+	"os"
 	"time"
 
 	uatradio "../gouatradio"
 	humanize "github.com/dustin/go-humanize"
+)
+
+const (
+	RECEIVE_LOG = "/var/log/messages_received.log"
 )
 
 type status struct {
@@ -27,6 +32,9 @@ var globalStatus status
 // Run options.
 var manualLat float64 // Manually entered station lat.
 var manualLng float64 // Manually entered station lng.
+
+// Message logging.
+var receiveLogFp *os.File
 
 func generateUATEncodedTextReportMessage(msg *txwx.WeatherMessage) {
 	// Observation time - zulu.
@@ -81,6 +89,20 @@ func startup() {
 	flag.Parse()
 }
 
+func openReceiveLog() {
+	fp, err := os.OpenFile(RECEIVE_LOG, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Printf("Unable to open logfile: %s\n", err.Error())
+		panic(err)
+		return
+	}
+	receiveLogFp = fp
+}
+
+func writeReceiveLog(stationLat float32, stationLng float32, msg string) {
+	fmt.Fprintf(receiveLogFp, "%0.4f,%0.4f,%0.4f,%0.4f,%s\n", stationLat, stationLng, Location.GPSLatitude, Location.GPSLongitude, msg)
+}
+
 func main() {
 	startup()
 	setupLogging("/var/log/rxwx.log") // Open logfile, set "log" output to save there and print to stdout.
@@ -96,6 +118,8 @@ func main() {
 		}
 		return
 	}
+
+	openReceiveLog()
 
 	go printStats()
 
@@ -153,6 +177,7 @@ func main() {
 		calculatedCRC := crc64.Checksum(trimmedData, crc64Table)
 		if crc != calculatedCRC {
 			//fmt.Printf("skipping - CRC bad.\n")
+			writeReceiveLog(0, 0, "crcbad")
 			globalStatus.CRCErrors++
 			continue
 		}
@@ -168,10 +193,12 @@ func main() {
 		switch msg.Type {
 		case txwx.WeatherMessage_METAR, txwx.WeatherMessage_TAF:
 			generateUATEncodedTextReportMessage(msg)
-			log.Printf("OK: %s\n", msg.TextData)
+			writeReceiveLog(msg.StationLat, msg.StationLng, msg.TextData)
 		case txwx.WeatherMessage_BEACON:
 			if msg.ServerStatus != nil {
-				log.Printf("Received beacon message from station (%0.4f, %0.4f): TimeOk=%t, WeatherUpdatesOk=%t, MetarsTracked=%d, TafsTracked=%d.\n", msg.StationLat, msg.StationLng, msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
+				beaconStr := fmt.Sprintf("TimeOk=%t, WeatherUpdatesOk=%t, MetarsTracked=%d, TafsTracked=%d", msg.ServerStatus.TimeOk, msg.ServerStatus.WeatherUpdatesOk, msg.ServerStatus.MetarsTracked, msg.ServerStatus.TafsTracked)
+				log.Printf("Received beacon message from station (%0.4f, %0.4f): %s.\n", msg.StationLat, msg.StationLng, beaconStr)
+				writeReceiveLog(msg.StationLat, msg.StationLng, beaconStr)
 			}
 		default:
 		}
