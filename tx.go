@@ -198,8 +198,10 @@ func main() {
 	}
 
 	go situationUpdater() // Update current station position from Stratux.
-	go updateWeather()    // Update weather data from ADDS.
-	go printStats()       // Periodically print stats.
+	if !beaconMode && (txMetars || txTafs) {
+		go updateWeather() // Update weather data from ADDS.
+	}
+	go printStats() // Periodically print stats.
 
 	for {
 		lookupMutex.Lock()
