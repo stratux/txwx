@@ -98,7 +98,7 @@
 			var map;
 			function addMarker(marker_lat, marker_lng, marker_name, tower_tier) {
 				var image = {
-					url: '/antenna-64x64.png', // image is 64x64.
+					url: 'http://towers.stratux.me/antenna-64x64.png', // image is 64x64.
 					scaledSize: new google.maps.Size(32, 32)
 				}; 
 
@@ -243,6 +243,8 @@
 					});
 					map.fitBounds(bounds);
 				});
+
+DATA_HERE
 
 			}
 		</script>
