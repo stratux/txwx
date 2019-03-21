@@ -27,6 +27,9 @@ type status struct {
 	CRCErrors        uint64
 }
 
+var txwxBuild string
+var txwxVersion string
+
 var globalStatus status
 
 // Run options.
@@ -120,6 +123,8 @@ func main() {
 	}
 
 	openReceiveLog()
+
+	log.Printf("Starting RX %s-%s.\n", txwxVersion, txwxBuild[:10])
 
 	go printStats()
 

@@ -27,6 +27,9 @@ type status struct {
 	MessagesSent uint64
 }
 
+var txwxBuild string
+var txwxVersion string
+
 var globalStatus status
 
 var crc64Table *crc64.Table
@@ -201,6 +204,8 @@ func main() {
 	if !beaconMode && (txMetars || txTafs) {
 		go updateWeather() // Update weather data from ADDS.
 	}
+
+	log.Printf("Starting TX %s-%s.\n", txwxVersion, txwxBuild[:10])
 	go printStats() // Periodically print stats.
 
 	for {
