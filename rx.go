@@ -128,7 +128,7 @@ func main() {
 
 	go printStats()
 
-	u, err := uatradio.NewUATRadio(globalSettings.Freq, globalSettings.RadioModMode, 0x7029)
+	u, err := uatradio.NewUATRadio(globalSettings.Freq, globalSettings.RadioModMode, 0x7028)
 	if err != nil {
 		log.Printf("Unable to open radio: %s\n", err.Error())
 		panic(err)
