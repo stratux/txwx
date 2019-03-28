@@ -29,6 +29,7 @@ type status struct {
 
 var txwxBuild string
 var txwxVersion string
+var productID int
 
 var globalStatus status
 
@@ -167,6 +168,7 @@ func startup() {
 	flag.Float64Var(&globalSettings.ManualLat, "lat", 0.0, "Station latitude. If entered with longitude, GPS data is not used.")
 	flag.Float64Var(&globalSettings.ManualLng, "lng", 0.0, "Station longitude. If entered with latitude, GPS data is not used.")
 
+	flag.IntVar(&productID, "productID", 0x7029, "TX dongle Product ID.")
 	flag.Parse()
 }
 
@@ -183,7 +185,7 @@ func main() {
 		return
 	}
 
-	u, err := uatradio.NewUATRadio(globalSettings.Freq, globalSettings.RadioModMode, 0x7029)
+	u, err := uatradio.NewUATRadio(globalSettings.Freq, globalSettings.RadioModMode, productID)
 
 	if err != nil {
 		log.Printf("Unable to open radio: %s\n", err.Error())
