@@ -73,19 +73,28 @@ func situationUpdater() {
 			continue
 		}
 
-		err = json.Unmarshal(body, &Location)
+		var thisLocation MySituation
+
+		err = json.Unmarshal(body, &thisLocation)
 
 		if err != nil {
 			log.Printf("HTTP JSON unmarshal error: %s\n", err.Error())
 		}
 		resp.Body.Close()
-		if Location.GPSFixQuality > 0 {
+
+		if thisLocation.GPSFixQuality == 0 && stationGeoPt != nil {
+			// There is already a station location that is set. Don't overwrite with null data.
+			continue
+		}
+
+		if thisLocation.GPSFixQuality > 0 {
 			if stationGeoPt == nil {
 				// First lock.
 				log.Printf("First GPS location obtained.\n")
 			}
-			stationGeoPt = geo.NewPoint(float64(Location.GPSLatitude), float64(Location.GPSLongitude))
+			stationGeoPt = geo.NewPoint(float64(thisLocation.GPSLatitude), float64(thisLocation.GPSLongitude))
 		}
+		Location = thisLocation
 	}
 }
 
